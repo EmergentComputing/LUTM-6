@@ -293,9 +293,17 @@ program seeds are used unless explicitly supplied through `initial_programs`.
 
 Elites are ranked by fitness, preferring **new children on exact ties**, then stable
 index. This permits neutral turnover without a diversity metric or deduplication
-rule. Scheduled migrants are sampled from other islands' elites; random immigrants
-are fresh programs. The copied best-ever archive updates only on strict improvement
+rule. On migration generations, each migrant's donor island is chosen uniformly
+from all other islands, then its individual is chosen uniformly from that island's
+**whole population**, with replacement and no fitness or validity filter. Migrants
+are copied unchanged; receiving islands keep their own elites. Migration fraction
+and interval are configurable. Random immigrants are fresh programs. The copied
+best-ever archive updates only on strict improvement
 and is not continually reinserted into the population.
+
+The full-population donor rule replaces the earlier elite-only policy. Resuming
+an older checkpoint with this code uses the new migration rule on subsequent
+migration generations; it does not reproduce the older policy's trajectory.
 
 The GA runs in NumPy; either batched simulator can evaluate it. The notebook prints
 progress during training and exposes per-island champions. Charts show current/global

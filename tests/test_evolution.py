@@ -98,6 +98,64 @@ class EvolutionTests(unittest.TestCase):
         self.assertTrue(np.all(flags[:, 6:]))
         validate_population(out.reshape(-1, 20), lengths.ravel(), self.c)
 
+    def test_migration_samples_full_population_without_fitness_filter(self):
+        g = replace(self.g, elite_fraction=.25, cross_island_fraction=.25,
+                    random_immigrant_fraction=0., p_insert=0., p_delete=0.,
+                    p_symbol_mutation=0., p_crossover=0.)
+        # Island symbol + unique within-island length identify every donor.
+        lengths = np.tile(np.arange(1, 13, dtype=np.int32), (3, 1))
+        values = np.broadcast_to(np.arange(1, 4, dtype=np.uint8)[:, None, None], (3, 12, 20)).copy()
+        values[np.arange(20) >= lengths[..., None]] = 0
+        before_values, before_lengths = values.copy(), lengths.copy()
+        seed = 912
+        reference_rng = np.random.default_rng(seed)
+        source = reference_rng.integers(0, 2, size=(3, 3))
+        source += source >= np.arange(3)[:, None]
+        individual = reference_rng.integers(0, 12, size=(3, 3))
+        expected_values, expected_lengths = values[source, individual], lengths[source, individual]
+        totals = np.tile(np.array([0, 12, 0, 0, 1, 3, 4, 5], dtype=np.uint64), (36, 1))
+        totals[:, 0] = np.tile(np.arange(12), 3)
+        # Force one known sampled donor to be invalid and worse than all elites.
+        invalid_donor = int(source[0, 0] * 12 + individual[0, 0])
+        totals[invalid_donor] = [0, 12, 1, 0, 0, 0, 0, 0]
+        ev = Evaluation(totals, 1, .5)
+        child_flags = np.zeros((3, 12), dtype=bool)
+        out, sizes, flags = reproduce(values, lengths, ev, child_flags, 2, g, np.random.default_rng(seed))
+        np.testing.assert_array_equal(out[:, 3:6], expected_values)
+        np.testing.assert_array_equal(sizes[:, 3:6], expected_lengths)
+        self.assertTrue(np.any(individual < 9))  # not restricted to high-ranking indices9..11
+        self.assertLess(ev.fitness[invalid_donor], 0)
+        order = rank_population(ev.fitness.reshape(3, 12), child_flags)
+        np.testing.assert_array_equal(out[:, :3], values[np.arange(3)[:, None], order[:, :3]])
+        np.testing.assert_array_equal(sizes[:, :3], lengths[np.arange(3)[:, None], order[:, :3]])
+        # Change all fitness rankings; migration draws must remain identical.
+        other = totals.copy()
+        other[:, 0] = 12 - other[:, 0]
+        other[invalid_donor, 0] = 0
+        changed, changed_sizes, _ = reproduce(values, lengths, Evaluation(other, 1, .5),
+                                              child_flags, 2, g, np.random.default_rng(seed))
+        np.testing.assert_array_equal(changed[:, 3:6], expected_values)
+        np.testing.assert_array_equal(changed_sizes[:, 3:6], expected_lengths)
+        np.testing.assert_array_equal(values, before_values)
+        np.testing.assert_array_equal(lengths, before_lengths)
+        self.assertTrue(np.all(~flags[:, :6]) and np.all(flags[:, 6:]))
+        validate_population(out.reshape(-1, 20), sizes.ravel(), self.c)
+
+    def test_one_percent_migration_every_ten_generations(self):
+        g = replace(self.g, population_per_island=1000, elite_fraction=.02,
+                    cross_island_fraction=.01, cross_island_interval=10,
+                    random_immigrant_fraction=.10)
+        self.assertEqual(g.slot_counts(True), (20, 10, 100, 870))
+        self.assertEqual(g.slot_counts(False), (20, 0, 100, 880))
+        values, lengths = random_programs(np.random.default_rng(14), (3, 1000), 20, g.symbols)
+        ev = Evaluation(np.tile(np.array([1, 2, 0, 0, 1, 3, 4, 5], dtype=np.uint64), (3000, 1)), 1, .5)
+        for generation in (1, 9, 10, 11, 19, 20):
+            out, sizes, flags = reproduce(values, lengths, ev, np.zeros((3, 1000), dtype=bool),
+                                          generation, g, np.random.default_rng(27))
+            copied = 130 if generation % 10 == 0 else 120
+            self.assertTrue(np.all(~flags[:, :copied]) and np.all(flags[:, copied:]))
+            validate_population(out.reshape(-1, 20), sizes.ravel(), self.c)
+
     def test_resume_and_diagnostic_independence(self):
         with tempfile.TemporaryDirectory() as directory:
             a = Trainer(NumpySimulator(self.c, 11), self.data, self.g, runs_directory=directory)

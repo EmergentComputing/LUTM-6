@@ -160,6 +160,7 @@ def mutate(rng, values, lengths, config):
 
 
 def reproduce(values, lengths, evaluation, is_child, generation, config, rng):
+    """Preserve local elites; sample unchanged migrants from whole other islands."""
     islands, n, width = values.shape
     fitness = evaluation.fitness.reshape(islands, n)
     order = rank_population(fitness, is_child)
@@ -173,8 +174,8 @@ def reproduce(values, lengths, evaluation, is_child, generation, config, rng):
     if m:
         source = rng.integers(0, islands - 1, size=(islands, m))
         source += source >= island
-        elite_index = rng.integers(0, e, size=(islands, m))
-        source_index = order[source, elite_index]
+        # Independent uniform draws with replacement; no donor fitness filter.
+        source_index = rng.integers(0, n, size=(islands, m))
         new[:, position:position + m] = values[source, source_index]
         sizes[:, position:position + m] = lengths[source, source_index]
         position += m
